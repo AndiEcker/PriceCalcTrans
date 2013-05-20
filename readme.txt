@@ -70,8 +70,6 @@ Changes to the ruleset will only be passed back to SIHOT by clicking the Modify 
 - best price calculation (subset of rules can be marked to evaluate the best price - ignoring the rule priority - would need more input parameters from the SIHOT application to be passed into the lua script in order to calculate total stay price minimum).
 - extend rule with accumulation flag (price finding process not terminates on rules with this flag set and the current action values get merged with the next rule where the conditions are matching).
 - multi-language support (i18n).
-- dynamic condition and action types (currently the type of conditions and actions are hard-coded but could be passed into a INI file in order to allow the definition of new condition and action types dynamically).
-- more configuration settings (e.g. promo codes for list box section, default ranges, Res Channels/NN/.. codes, ...).
 - UI enhancements: cancel app warning message, console debug messages, resizing and ui state restoring, ... please bare with me - this is my first Qt ;-)
 
 <EOF>
