@@ -5,7 +5,7 @@ Created on Feb 2, 2012
 
 @author: andi
 '''
-import os, copy, pickle
+import os, copy
 from datetime import date       # needed for validation within eval expressions
 
 from PyQt4.Qt import Qt
@@ -22,7 +22,11 @@ _Y = ' Year'
 _M = ' Month'
 _D = ' Day'
 
-# lua code fragments
+# lua code fragments and markers
+_COLSEP = '\v'   # vertical tab
+_VALSEP = '\t'
+_TYPEPARSEP = '\a'  # bell
+#_PARAMSEP = '\e'    # escape
 _INDENT = '   '
 _LINESEP = '\r\n'
 _OP_AND = ' and '
@@ -94,108 +98,23 @@ def _DATE_RANGE_VALID_EXPR(field, field2):
 _INT_RANGE_SEP = _DATE_RANGE_SEP
 
 
-#############   Raw Data Models   ##################################################
+######################   _CodeFragTypes base class with specializations CondTypes and ActTypes   #################################
 
-# raw rules data == extended list of _Rule objects
-class _Rules(list):
-    def validate(self):
-        ret = ''
-        try:
-            for r in self:
-                validationErrorMsg = r.validate()
-                if validationErrorMsg:
-                    ret += _TR("<p><p>Rule <b>'{0}'</b> has the following validation errors:<p>")\
-                            .format(r.name) \
-                           + validationErrorMsg
-        except Exception as e:
-            ret = _TR("_Rules validation system error: {0}").format(e)
-        return ret
-    def luaCode(self):
-        elseifs = [ r.luaCode() for r in self if r.enabled ]
-        return _LINESEP \
-            + 'function calcPrice()' + _LINESEP \
-            + _INDENT + 'day_price = sn_standardamount' + _LINESEP \
-            + _INDENT + _LINESEP.join(elseifs)[len(_INDENT) + len(_COND_ELSE):] + _LINESEP \
-            + _INDENT + ('end' if len(elseifs) else '') + _LINESEP \
-            + _INDENT + 'return ( day_price )' + _LINESEP \
-            + 'end' + _LINESEP
+
+class _CodeFragTypes(object):
+    _name = ''
+    _typeCaptions = []
+    _isExclusives = []
+    _paramTemplates = []
+    _luaTemplates = []
+    _params = []
+    _validationTemplates = []
+    _validationCaptions = []
 
 
 
-class _Rule(object):
-    def __init__(self):
-        self.name = _TR("(new rule)")
-        self.conditions = []
-        self.actions = []
-        self.enabled = True
-
-    def validate(self):
-        return "".join([ c.validate() for c in self.conditions ]
-                       + [ a.validate() for a in self.actions ]) \
-            if self.enabled else ""     # don't validate disabled rule
-    def luaCode(self):
-        # check for empty/TRUE condition
-        conditions = filter(lambda c: c.typeI >= 0, self.conditions)
-        if len(conditions):
-            condCode = _OP_AND.join([ c.luaCode() for c in conditions ]) 
-        else:
-            condCode = 'true'
-        return _INDENT + _COND_ELSE + 'if (' + condCode + ') then' + _LINESEP \
-            + _LINESEP.join([ _INDENT + _INDENT + a.luaCode() for a in self.actions 
-                              if a.typeI >= 0 ]) + _LINESEP
-
-# base class for Condition and Action
-class _CodeFragment(object):
-    def __init__(self):
-        self.params = dict()  #{}
-        self.typeI = -1
-
-    def setTypeIndex(self, typeI, types):
-        if self._isExclusives[typeI]:     # prevent duplicate exclusive condition/action type
-            ret = len(filter(lambda c: c.typeI == typeI and c is not self, types)) == 0
-            if not ret:
-                _WARNING(_TR("{0} Type '{1}' is already added to this rule.<p>" \
-                             + " If you want to specify another value of this {0} Type then add a new rule instead.")\
-                          .format(self._name, self._typeCaptions[typeI]))
-        else:
-            ret = True
-        if ret:
-            if typeI != self.typeI and self.params.keys() != self._params[typeI].keys():
-                self.params = dict(self._params[typeI])
-            self.typeI = typeI
-        return ret
-
-    def typeIndex(self):
-        return self.typeI
-    def caption(self):
-        typeI = self.typeI
-        return self._typeCaptions[typeI] if typeI >= 0 \
-          else _TR("(Select {0} Type)").format(self._name)
-    def formatParams(self):
-        typeI = self.typeI
-        return self._paramTemplates[typeI].format(**self.params) if typeI >= 0 else ''
-    def parseParams(self, userinput):
-        return parseStrToDict(userinput, self._paramTemplates[self.typeI], self.params) \
-            if self.typeI >= 0 else False #and userinput else False
-    def validate(self):
-        ret = ""
-        if self.typeI >= 0:
-            try:
-                if not eval(self._validationTemplates[self.typeI].format(**self.params)):
-                    ret = _TR("<p>{0} <b>{1}</b> evaluation error: {2}!")\
-                            .format(self._name, self.caption(),
-                                    self._validationCaptions[self.typeI].format(**self.params))
-            except Exception as e:
-                ret = _TR("<p>{0} <b>{1}</b> format error: {2}!")\
-                        .format(self._name, self.caption(), e)
-        return ret
-    def luaCode(self):
-        return self._luaTemplates[self.typeI].format(**self.params) if self.typeI >= 0 else ''
-
-
-
-class Condition(_CodeFragment):
-    _name = 'Condition'
+class CondTypes(_CodeFragTypes):
+    _name = 'ConditionType'
     _typeCaptions = [ _TR("Selling Date Range"), 
                       _TR("Arrival Date Range"), 
                       _TR("Full Stay Date Range"), 
@@ -241,8 +160,8 @@ class Condition(_CodeFragment):
                             _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ") and the number of days has to be between 1 and 365") ]
         
 
-class Action(_CodeFragment):
-    _name = 'Action'
+class ActTypes(_CodeFragTypes):
+    _name = 'ActionType'
     _typeCaptions = [ _TR("Discount Percentage"),
                       _TR("Promo Code"),
                       _TR("Channel"),
@@ -307,13 +226,174 @@ class Action(_CodeFragment):
                                 + _DATE_FORMAT('To') + ")") ]
 
 
+"""
+#############   Raw Data   ##################################################
+"""
+
+
+#############   Rules   ##################################################
+
+
+# raw rules data == extended list of _Rule objects
+class _Rules(list):
+    def __init__(self, codedRules = None, *args, **kwargs):
+        super(_Rules, self).__init__(*args, **kwargs)
+        if codedRules:
+            for codedRule in codedRules.split(_LINESEP):
+                self.append(_Rule(codedRule))
+    def codeRules(self):
+        return _LINESEP.join([r.codeRule() for r in self])
+
+    def validate(self):
+        ret = ''
+        try:
+            for r in self:
+                validationErrorMsg = r.validate()
+                if validationErrorMsg:
+                    ret += _TR("<p><p>Rule <b>'{0}'</b> has the following validation errors:<p>")\
+                            .format(r.name) \
+                           + validationErrorMsg
+        except Exception as e:
+            ret = _TR("_Rules validation system error: {0}").format(e)
+        return ret
+    def luaCode(self):
+        elseifs = [ r.luaCode() for r in self if r.enabled ]
+        return _LINESEP \
+            + 'function calcPrice()' + _LINESEP \
+            + _INDENT + 'day_price = sn_standardamount' + _LINESEP \
+            + _INDENT + _LINESEP.join(elseifs)[len(_INDENT) + len(_COND_ELSE):] + _LINESEP \
+            + _INDENT + ('end' if len(elseifs) else '') + _LINESEP \
+            + _INDENT + 'return ( day_price )' + _LINESEP \
+            + 'end' + _LINESEP
+
+
+class _Rule(object):
+    def __init__(self, codedRule = None):
+        if codedRule:
+            parts = codedRule.split(_COLSEP)
+            self.enabled = parts[0][0] == '+'
+            self.name = parts[0][1:]
+            self.conditions = [Condition(cc) for cc in parts[1].split(_VALSEP)]
+            self.actions = [Action(ca) for ca in parts[2].split(_VALSEP)]
+        else:
+            self.enabled = True
+            self.name = _TR("(new rule)")
+            self.conditions = []
+            self.actions = []
+    def codeRule(self):
+        # self.name is QString not str
+        return ('+' if self.enabled else '-') + str(self.name) \
+               + _COLSEP + _VALSEP.join([c.codeCodeFrag() for c in self.conditions]) \
+               + _COLSEP + _VALSEP.join([a.codeCodeFrag() for a in self.actions])
+
+
+    def validate(self):
+        return "".join([ c.validate() for c in self.conditions ]
+                       + [ a.validate() for a in self.actions ]) \
+            if self.enabled else ""     # don't validate disabled rule
+    def luaCode(self):
+        # check for empty/TRUE condition
+        conditions = filter(lambda c: c.typeI >= 0, self.conditions)
+        if len(conditions):
+            condCode = _OP_AND.join([ c.luaCode() for c in conditions ]) 
+        else:
+            condCode = 'true'
+        return _INDENT + _COND_ELSE + 'if (' + condCode + ') then' + _LINESEP \
+            + _LINESEP.join([ _INDENT + _INDENT + a.luaCode() for a in self.actions 
+                              if a.typeI >= 0 ]) + _LINESEP
+
+
+
+
+######################   _CodeFragment base class with specializations Condition and Action   #################################
+
+# single instance of conditionTypes and actionTypes (for all Condition/Action classes instances) - overloaded by config file content
+actionTypes = ActTypes()
+conditionTypes = CondTypes()
+
+
+
+# base class for Condition and Action
+class _CodeFragment(object):
+    typeI = -1
+    params = {}
+    _name = ''
+    _types = None
+    def __init__(self, codedCodeFrag = None):
+        self.params = dict()     # or {} - needed for to create individual dict for each instance
+        if codedCodeFrag:
+            parts = codedCodeFrag.split(_TYPEPARSEP)
+            self.typeI = int(parts[0])
+            #parts = parts[1].split(_PARAMSEP)
+            #for keyval in parts:
+            #    key, val = keyval.split('=')
+            #    self.params[key] = eval(val)
+            self.params = eval(parts[1])
+    def codeCodeFrag(self):
+        #return str(self.typeI) + _TYPEPARSEP  + _PARAMSEP.join([key + "=" + (str(val) if type(val) is int or type(val) is float else '"' + val + '"') for key, val in self.params.iteritems()])
+        return str(self.typeI) + _TYPEPARSEP  + str(self.params)
+
+    def setTypeIndex(self, typeI, types):
+        if self._types._isExclusives[typeI]:     # prevent duplicate exclusive condition/action type
+            ret = len(filter(lambda c: c.typeI == typeI and c is not self, types)) == 0
+            if not ret:
+                _WARNING(_TR("{0} Type '{1}' is already added to this rule.<p>" \
+                             + " If you want to specify another value of this {0} Type then add a new rule instead.")\
+                          .format(self._name, self._types._typeCaptions[typeI]))
+        else:
+            ret = True
+        if ret:
+            if typeI != self.typeI and self.params.keys() != self._types._params[typeI].keys():
+                self.params = dict(self._types._params[typeI])
+            self.typeI = typeI
+        return ret
+
+    def typeIndex(self):
+        return self.typeI
+    def caption(self):
+        typeI = self.typeI
+        return self._types._typeCaptions[typeI] if typeI >= 0 \
+          else _TR("(Select {0} Type)").format(self._name)
+    def formatParams(self):
+        typeI = self.typeI
+        return self._types._paramTemplates[typeI].format(**self.params) if typeI >= 0 else ''
+    def parseParams(self, userinput):
+        return _parseStrToDict(userinput, self._types._paramTemplates[self.typeI], self.params) \
+            if self.typeI >= 0 else False #and userinput else False
+    def validate(self):
+        ret = ""
+        if self.typeI >= 0:
+            try:
+                if not eval(self._types._validationTemplates[self.typeI].format(**self.params)):
+                    ret = _TR("<p>{0} <b>{1}</b> evaluation error: {2}!")\
+                            .format(self._name, self.caption(),
+                                    self._types._validationCaptions[self.typeI].format(**self.params))
+            except Exception as e:
+                ret = _TR("<p>{0} <b>{1}</b> format error: {2}!")\
+                        .format(self._name, self.caption(), e)
+        return ret
+    def luaCode(self):
+        return self._types._luaTemplates[self.typeI].format(**self.params) if self.typeI >= 0 else ''
+
+
+class Condition(_CodeFragment):
+    _name = 'Condition'
+    _types = conditionTypes
+        
+class Action(_CodeFragment):
+    _name = 'Action'
+    _types = actionTypes
+
+
+
 ######################   QT Table Models   #################################
 
 
 class RulesModel(QAbstractTableModel):
-    def __init__(self, parent = None, *args):
-        QAbstractTableModel.__init__(self, parent, *args)
-        self._rules = _Rules()    # also set by setRawRules() method
+    def __init__(self, scriptFileName, *args):
+        QAbstractTableModel.__init__(self, *args)
+        self._scriptFileName = scriptFileName
+        self._rules = _Rules(_loadScript(scriptFileName))    # also set by setRawRules() method
         self._modified = False
         self._sourceRowForNextAdd = -1
         self.dataChanged.connect(self._dataModified) 
@@ -409,6 +489,7 @@ class RulesModel(QAbstractTableModel):
             tmp = self._rules.pop(row)
             self._rules.insert(row + delta, tmp)
             self.endMoveRows()
+            self._dataModified()
     
     def _dataModified(self):
         self._modified = True
@@ -424,25 +505,17 @@ class RulesModel(QAbstractTableModel):
         return self._rules[row].actions
     def setSourceRowForNextAdd(self, sourceRowForNextAdd):
         self._sourceRowForNextAdd = sourceRowForNextAdd
+    def saveScript(self):
+        _saveScript(self._scriptFileName, self._rules.codeRules(), self._rules.luaCode())
+        
     
     
 # base data table model class for ConditionsModel and ActionsModel
 class _CodeFragsModel(QAbstractTableModel):
-    def __init__(self, frags, fragClass, parent, config, *args): # parent is a rulesModel instance
+    def __init__(self, frags, fragClass, parent, *args): # parent is a rulesModel instance
         QAbstractTableModel.__init__(self, parent, *args)
         self._frags = frags
         self._fragClass = fragClass
-        
-        if config:                                # config file exists
-            codeFragName = fragClass._name
-            codeFragCount = config.getint('main', 'Num' + codeFragName + 's')
-            if codeFragCount:                     # Conditions/Actions are specified within config - load/overwrite within class/type (either Condition or Action)
-                # overwrite configurable class attributes (_luaTemplates, _validationTemplates, _typeCaptions, _isExclusives, _params, _paramTemplates, _validationCaptions)
-                for attr in [a for a in self._fragClass.__dict__ if not a.startswith('__') and not a.startswith('_name')]:
-                    attrVals = []
-                    for nI in range(codeFragCount):
-                        attrVals.append(eval(config.get(codeFragName + str(nI), attr[1:-1])))
-                    setattr(self._fragClass, attr, attrVals)
         self.dataChanged.connect(parent._dataModified)
          
     def rowCount(self, parent = None):
@@ -510,60 +583,16 @@ class _CodeFragsModel(QAbstractTableModel):
     
 
 class ConditionsModel(_CodeFragsModel):
-    def __init__(self, frags, parent, config, *args): # parent is a rulesModel instance
-        _CodeFragsModel.__init__(self, frags, Condition, parent, config, *args)
+    def __init__(self, frags, parent, *args): # parent is a rulesModel instance
+        _CodeFragsModel.__init__(self, frags, Condition, parent, *args)
 
 
 class ActionsModel(_CodeFragsModel):
-    def __init__(self, frags, parent, config, *args): # parent is a rulesModel instance
-        _CodeFragsModel.__init__(self, frags, Action, parent, config, *args)
+    def __init__(self, frags, parent, *args): # parent is a rulesModel instance
+        _CodeFragsModel.__init__(self, frags, Action, parent, *args)
 
 
     
-# helper class for script file handling, encapsulating and providing RulesModel for UI
-class PriceCalcScript(object):
-    def __init__(self, fnam):
-        self.fnam = fnam
-        self.rulesModel = RulesModel()
-
-    def load(self):
-        if not os.path.isfile(self.fnam):
-            _WARNING(_TR("The lua script {0} could not be found!").format(self.fnam))
-            return
-        if os.stat(self.fnam).st_size == 0:
-            _WARNING(_TR("The lua script {0} is empty!").format(self.fnam))
-            return
-        fileObj = open(self.fnam, 'rb')
-        try:
-            hdr = fileObj.read(len(_HEADER_PREFIX))
-            rest = fileObj.read()
-            if hdr != _HEADER_PREFIX and hdr[-1] == '\r':   # file corrupted by Windows?
-                hdr = hdr[:-1] + '\n'                       # .. repair Windows detection trap
-                rest = rest[1:].replace(_LINESEP, '\n')     # .. and replace CrLf with Lf in pickle
-            if hdr == _HEADER_PREFIX:
-                rawRules = pickle.loads(rest)
-                self.rulesModel.setRawRules(rawRules)
-            else:
-                _ERROR(_TR("Header format error on opening lua script {0}.").format(self.fnam))
-        except Exception as e:
-            _ERROR(_TR("Error on opening lua script {0}: {1}").format(self.fnam, e))
-        fileObj.close()
-    
-    def save(self):
-        fileObj = open(self.fnam, 'wb')
-        try:
-            fileObj.write(_HEADER_PREFIX)
-            rawRules = self.rulesModel.getRawRules()
-            pickle.dump(rawRules, fileObj)
-            fileObj.write(_HEADER_SUFFIX)
-            fileObj.write(rawRules.luaCode())
-        except Exception as e:
-            _ERROR(_TR("Error on writing lua script {0}: {1}").format(self.fnam, e))
-        fileObj.close()
-
-        
-
-
 # helping function for to reverse the formatting operator (%)
 from string import Formatter, punctuation
 _parseStr = lambda x: x.isalpha() and x \
@@ -571,7 +600,7 @@ _parseStr = lambda x: x.isalpha() and x \
                     or x.isalnum() and x \
                     or len(set(punctuation).intersection(x)) == 1 and x.count('.') == 1 and float(x) \
                     or x
-def parseStrToDict(inpStr, formatStr, valDict):
+def _parseStrToDict(inpStr, formatStr, valDict):
     # parse is converting formatStr into list of (prefix, field, format_spec, conversion) tuples
     # .. - one for each valDict key
     frags = []
@@ -590,6 +619,72 @@ def parseStrToDict(inpStr, formatStr, valDict):
         val = inpStr[pos:]
         valDict[field] = val if 's' in spec else _parseStr(val)
     return True   
+
+
+def _loadScript(fnam):
+    if not os.path.isfile(fnam):
+        _WARNING(_TR("The lua script {0} could not be found!").format(fnam))
+        return
+    if os.stat(fnam).st_size == 0:
+        _WARNING(_TR("The lua script {0} is empty!").format(fnam))
+        return
+    ret = None
+    fileObj = open(fnam, 'rb')
+    try:
+        hdr = fileObj.read(len(_HEADER_PREFIX))
+        rest = fileObj.read()
+        if hdr != _HEADER_PREFIX and hdr[-1] == '\r':   # file corrupted by Windows?
+            hdr = hdr[:-1] + '\n'                       # .. repair Windows detection trap
+            rest = rest[1:].replace(_LINESEP, '\n')     # .. and replace CrLf with Lf in pickle
+        if hdr == _HEADER_PREFIX:
+            pos = rest.find(_HEADER_SUFFIX)
+            if pos >= 0:
+                ret = rest[:pos]
+            else:
+                _ERROR(_TR("Header suffix not found in lua script {0}.").format(fnam))
+        else:
+            _ERROR(_TR("Header prefix not found in lua script {0}.").format(fnam))
+    except Exception as e:
+        _ERROR(_TR("Error on opening lua script {0}: {1}").format(fnam, e))
+    fileObj.close()
+    return ret
+
+def _saveScript(fnam, codedRules, luaCode):
+    fileObj = open(fnam, 'wb')
+    try:
+        fileObj.write(_HEADER_PREFIX)
+        fileObj.write(codedRules)
+        fileObj.write(_HEADER_SUFFIX)
+        fileObj.write(luaCode)
+    except Exception as e:
+        _ERROR(_TR("Error on writing lua script {0}: {1}").format(fnam, e))
+    fileObj.close()
+
+
+def _loadCodeFragTypes(config, codeFragTypeClass):
+    codeFragCount = config.getint('main', 'Num' + codeFragTypeClass._name + 's')
+    if codeFragCount:                     # Conditions/Actions are specified within config - load/overwrite within class/type (either Condition or Action)
+        # overwrite configurable class attributes (_luaTemplates, _validationTemplates, _typeCaptions, _isExclusives, _params, _paramTemplates, _validationCaptions)
+        for attr in [a for a in codeFragTypeClass.__dict__ if not a.startswith('__') and not a.startswith('_name')]:
+            attrVals = []
+            for nI in range(codeFragCount):
+                attrVals.append(eval(config.get(codeFragTypeClass._name + str(nI), attr[1:-1])))
+            setattr(codeFragTypeClass, attr, attrVals)
+    return codeFragTypeClass()    
+
+
+
+# public helper method for app init: types, data/script file handling and providing RulesModel for UI
+def initTypesDataAndModel(fnam, config):
+    # if .cfg exists then overwrite the both (single instance) code fragment type classes
+    if config:                                
+        conditionTypes = _loadCodeFragTypes(config, CondTypes)
+        actionTypes = _loadCodeFragTypes(config, ActTypes)
+    # return rules/root model instance
+    return RulesModel(fnam)
+
+        
+
 
 #
 #if __name__ == '__main__':

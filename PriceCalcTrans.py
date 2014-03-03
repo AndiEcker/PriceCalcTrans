@@ -17,8 +17,8 @@ from PyQt4.QtGui import QApplication, QMainWindow, QStatusBar, QMessageBox, \
     QTableView, QAbstractItemView, QStyledItemDelegate, QFont, QPixmap, QCloseEvent
 
 from app_const import APP_TITLE, APP_VERSION
-# import data models (PriceCalcScript encapsulates RulesModel)
-from model import Condition, Action, ConditionsModel, ActionsModel, PriceCalcScript
+# import data models (initTypesDataAndModel encapsulates RulesModel)
+from model import Condition, Action, ConditionsModel, ActionsModel, initTypesDataAndModel
 
 # used for entering condition/action type
 class ComboBoxDelegate(QStyledItemDelegate): #QItemDelegate):
@@ -47,11 +47,10 @@ class MainWindow(QMainWindow):
     """
         Initialization
     """
-    def __init__(self, rulesModel, logoFnam, config, *args):
+    def __init__(self, rulesModel, logoFnam, *args):
         QMainWindow.__init__(self, *args)
         
         self.rulesModel = rulesModel
-        self.config = config
         
         self.rulesModel.dataChanged.connect(self._statusRefresh)
         
@@ -108,10 +107,10 @@ class MainWindow(QMainWindow):
         self.condView = QTableView()
         conds = self.rulesModel.ruleConditions(row) if row in range(rcount) \
                 else []
-        self.condModel = ConditionsModel(conds, self.rulesModel, self.config)
+        self.condModel = ConditionsModel(conds, self.rulesModel)
         self.condModel.dataChanged.connect(self._codeFragChanged)
         self.condView.setModel(self.condModel)
-        self.condTypeDelegate = ComboBoxDelegate(Condition._typeCaptions)
+        self.condTypeDelegate = ComboBoxDelegate(Condition._types._typeCaptions)
         self.condView.setItemDelegateForColumn(0, self.condTypeDelegate)
         self.condView.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.condView.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -128,10 +127,10 @@ class MainWindow(QMainWindow):
         self.actionView = QTableView()   # parent = self.actionGB)
         actions = self.rulesModel.ruleActions(row) if row in range(rcount) \
                 else []
-        self.actionModel = ActionsModel(actions, self.rulesModel, self.config)
+        self.actionModel = ActionsModel(actions, self.rulesModel)
         self.actionModel.dataChanged.connect(self._codeFragChanged)
         self.actionView.setModel(self.actionModel)
-        self.actionTypeDelegate = ComboBoxDelegate(Action._typeCaptions)
+        self.actionTypeDelegate = ComboBoxDelegate(Action._types._typeCaptions)
         self.actionView.setItemDelegateForColumn(0, self.actionTypeDelegate)
         self.actionView.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.actionView.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -207,7 +206,7 @@ class MainWindow(QMainWindow):
                                         self.tr("Validation failed because of:<p><p>") + text)
                 event.ignore()
                 return              #  RETURN - cancel app closing ######
-            m_script.save()
+            self.rulesModel.saveScript()
         # accept window closing
         QMainWindow.closeEvent(self, event)
         # quit application
@@ -385,16 +384,15 @@ def main(args):
     logoFnam = args[2] if len(args) >= 3 else 'PriceCalcTrans.jpg'
     confFnam = args[3] if len(args) >= 4 else 'PriceCalcTrans.cfg'
 
-    global m_script
-    m_script = PriceCalcScript(luaFnam)
-    m_script.load()
-
     config = ConfigParser.SafeConfigParser()
     try:
         config.readfp(open(confFnam))
     except:
         config = None
-    win = MainWindow(m_script.rulesModel, logoFnam, config)
+
+    rulesModel = initTypesDataAndModel(luaFnam, config)
+
+    win = MainWindow(rulesModel, logoFnam)
     win.setWindowTitle(win.tr(APP_TITLE) + " " + APP_VERSION + "      " + luaFnam)
     win.show()
     win._restoreAppState()

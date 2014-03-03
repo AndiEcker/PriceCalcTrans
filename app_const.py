@@ -29,9 +29,11 @@ Created on 01-Feb-2012
  V1.5      08-Oct-2012   bug fix (integer rounding was missing for 2nd reselling date).
  V1.6      09-May-2013   Added new condition (sold min days before arrival date range).
  V2.0      13-May-2013   Moved conditions and actions into external config/ini file.
+ V3.0      02-Mar-2014   Fixed bug with config file (rules display showing hard-coded cond/actions instead of the ones from cfg file)
+                         and refactored lua script header from using string coding instead of pickle. 
                                 
 @author: andi
 '''
 APP_TITLE = 'SiHOT Price Calculation Rules Transformer'
-APP_VERSION = '2.0'
+APP_VERSION = '3.0'
 
