@@ -12,31 +12,31 @@ from PyQt4.Qt import Qt
 from PyQt4.QtCore import QAbstractTableModel, QModelIndex, QVariant
 from PyQt4.QtGui import QApplication, QMessageBox
 
+from parse import parse
 
 #############   Constants and Macros   ##################################################
 
 from app_const import APP_TITLE
 
 # dict field name suffixes for year, month and day parts of date values
-_Y = ' Year'
-_M = ' Month'
-_D = ' Day'
+# .. DON'T USE white-chars/spaces because of parse module bug
+_Y = 'Year'
+_M = 'Month'
+_D = 'Day'
 
 # lua code fragments and markers
-_COLSEP = '\v'   # vertical tab
-_VALSEP = '\t'
-_TYPEPARSEP = '\a'  # bell
-#_PARAMSEP = '\e'    # escape
-_INDENT = '   '
+_INDENT = '   '     # strip()-able white chars
 _LINESEP = '\r\n'
-_OP_AND = ' and '
+_OP_AND = ' and ' 
 _COND_ELSE = 'else'
-_COMM_BEG = _LINESEP + '--[[' + _LINESEP
-_COMM_END = _LINESEP + '--]]' + _LINESEP
-_HEADER_PREFIX = _COMM_BEG + '      !!!   PLEASE NEVER CHANGE THE CONTENT OF THIS FILE   !!!' + _LINESEP \
+_COND_IF_BEG = 'if ('
+_COND_IF_END = ') then'
+_COMM_BEG = '--[['
+_COMM_END = '--]]'
+_HEADER_PREFIX = _LINESEP + _COMM_BEG + _LINESEP + '      !!!   PLEASE NEVER CHANGE THE CONTENT OF THIS FILE   !!!' + _LINESEP \
                 + _LINESEP + 'This file is exclusively maintained by the application ' + APP_TITLE + _LINESEP \
                 + '\n'      # last newline is unix style to detect if script uses windows style
-_HEADER_SUFFIX = _COMM_END
+_HEADER_SUFFIX = _LINESEP + _COMM_END + _LINESEP
 
 def _DAY_XLIT(field):  # dupl. lua-function-call curly brackets for string.format escaping
     return 'math.floor(os.time{{year={' + field+_Y + '}, month={' + field+_M \
@@ -107,123 +107,16 @@ class _CodeFragTypes(object):
     _isExclusives = []
     _paramTemplates = []
     _luaTemplates = []
+    _luaTemplSupportedVersionss = [[]]
     _params = []
     _validationTemplates = []
     _validationCaptions = []
 
-
-
 class CondTypes(_CodeFragTypes):
     _name = 'ConditionType'
-    _typeCaptions = [ _TR("Selling Date Range"), 
-                      _TR("Arrival Date Range"), 
-                      _TR("Full Stay Date Range"), 
-                      _TR("Length Of Stay Range"), 
-                      _TR("Intersection Date Range"),
-                      _TR("Sold min. days before arrival") ]
-    _isExclusives = [ True, True, True, True, True, True ]
-    _paramTemplates = [ _DATE_FORMAT('From') + _DATE_RANGE_SEP + _DATE_FORMAT('To'),
-                        _DATE_FORMAT('From') + _DATE_RANGE_SEP + _DATE_FORMAT('To'),
-                        _DATE_FORMAT('From') + _DATE_RANGE_SEP + _DATE_FORMAT('To'),
-                        "{From Days}" + _INT_RANGE_SEP + "{To Days}",
-                        _DATE_FORMAT('From') + _DATE_RANGE_SEP + _DATE_FORMAT('To'),
-                        "{Min Days} days before " + _DATE_FORMAT('From') + _DATE_RANGE_SEP + _DATE_FORMAT('To') ]
-    _luaTemplates = [ _DAY_XVAR('sts_ressellingdate') + ' >= ' + _DAY_XLIT('From')
-                      + ' and ' + _DAY_XVAR('sts_ressellingdate') + ' <= ' + _DAY_XLIT('To'),
-                      _DAY_XVAR('sts_fromdate') + ' >= ' + _DAY_XLIT('From')
-                      + ' and ' + _DAY_XVAR('sts_fromdate') + ' <= ' + _DAY_XLIT('To'),
-                      _DAY_XVAR('sts_fromdate') + ' >= ' + _DAY_XLIT('From')
-                      + ' and ' + _DAY_XVAR('sts_todate') + ' <= ' + _DAY_XLIT('To'),
-                      'sn_los >= {From Days} and sn_los <= {To Days}',
-                      _DAY_XVAR('sts_fromdate') + ' <= ' + _DAY_XLIT('To')
-                      + ' and ' + _DAY_XVAR('sts_todate') + ' > ' + _DAY_XLIT('From'),
-                      _DAY_XVAR('sts_fromdate') + ' >= ' + _DAY_XVAR('sts_ressellingdate') + ' + {Min Days}'
-                      + ' and ' + _DAY_XVAR('sts_fromdate') + ' >= ' + _DAY_XLIT('From')
-                      + ' and ' + _DAY_XVAR('sts_fromdate') + ' <= ' + _DAY_XLIT('To') ]
-    _params = [ _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31),
-                _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31),
-                _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31),
-                {"From Days" : 7, "To Days" : 13},
-                _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31),
-                _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31, 'Min Days', 30) ]
-    _validationTemplates = [ _DATE_RANGE_VALID_EXPR('From', 'To'),
-                             _DATE_RANGE_VALID_EXPR('From', 'To'),
-                             _DATE_RANGE_VALID_EXPR('From', 'To'),
-                             '{From Days} in range(1,101) and {To Days} in range(1,366) and {From Days} <= {To Days}',
-                             _DATE_RANGE_VALID_EXPR('From', 'To'),
-                             _DATE_RANGE_VALID_EXPR('From', 'To') + ' and {Min Days} in range(1,366)' ]
-    _validationCaptions = [ _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ")"),
-                            _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ")"),
-                            _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ")"),
-                            _TR("First value has to be less than the second one. First value has to be between 1 and 100, second between 1 and 365"),
-                            _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ")"),
-                            _TR("Start date (" + _DATE_FORMAT('From') + ") has to lie before the End date (" + _DATE_FORMAT('To') + ") and the number of days has to be between 1 and 365") ]
-        
 
 class ActTypes(_CodeFragTypes):
     _name = 'ActionType'
-    _typeCaptions = [ _TR("Discount Percentage"),
-                      _TR("Promo Code"),
-                      _TR("Channel"),
-                      _TR("NN1"),
-                      _TR("Free Days"),
-                      _TR("Market Code"),
-                      _TR("Source Code"),
-                      _TR("Medium Code"),
-                      _TR("Percentage in Date Range") ]
-    _isExclusives = [ True, True, True, True, True, True, True, True, False ]
-    _paramTemplates = [ "{Discount Percentage}",
-                        "{Promo Code:s}",
-                        "{Channel:s}",
-                        "{NN1:s}",
-                        "{Free Days}",
-                        "{Market Code:s}",
-                        "{Source Code:s}",
-                        "{Medium Code:s}",
-                        "{Percentage}@" + _DATE_FORMAT('From') + _DATE_RANGE_SEP 
-                        + _DATE_FORMAT('To') ]
-    _luaTemplates = [ 'RC_SN_DISCOUNT_PERCENTAGE = {Discount Percentage}',
-                      'RC_SS_PROMOCODE = "{Promo Code:s}"',
-                      'RC_SS_CHANNEL = "{Channel:s}"',
-                      'RC_SS_NN1 = "{NN1:s}"',
-                      'if sn_daynumber > sn_los - {Free Days} then day_price = 0 end',
-                      'RC_SS_MARCETCODE = "{Market Code:s}"',
-                      'RC_SS_RESERVATIONSOURCE = "{Source Code:s}"',
-                      'RC_SS_RESERVATIONMEDIUM = "{Medium Code:s}"',
-                      'if ' + _DAY_XVAR('sts_fromdate') + ' + sn_daynumber - 1 >= ' + _DAY_XLIT('From')
-                      + ' and ' + _DAY_XVAR('sts_fromdate') + ' + sn_daynumber - 1 <= ' + _DAY_XLIT('To')
-                      + ' then day_price = day_price * (100 - {Percentage}) / 100 end' ]
-    _params = [ {'Discount Percentage' : 6.0},
-                {'Promo Code' : _TR("PROMO CODE")},
-                {'Channel' : _TR("CHANNEL")},
-                {'NN1' : _TR("NN1")},
-                {'Free Days' : 1},
-                {'Market Code' : _TR("MARKET CODE")},
-                {'Source Code' : _TR("RESERVATION SOURCE CODE")},
-                {'Medium Code' : _TR("RESERVATION MEDIUM CODE")},
-                _DATE_RANGE_DICT('From', 2012, 1, 1, 'To', 2012, 12, 31, 
-                                 'Percentage', 9.0) ]
-    _validationTemplates = [ 'int({Discount Percentage}) in range(1,101)',
-                             'len("{Promo Code:s}") > 0 and len("{Promo Code:s}") <= 10',
-                             'len("{Channel:s}") > 0',
-                             'True',                         # allow empty value
-                             '{Free Days} in range(1,101)',
-                             'len("{Market Code:s}") > 0',
-                             'len("{Source Code:s}") > 0',
-                             'len("{Medium Code:s}") > 0',
-                             _DATE_RANGE_VALID_EXPR('From', 'To') 
-                             + ' and int({Percentage}) in range(1,101)' ]
-    _validationCaptions = [ _TR("Percentage value ({Discount Percentage}) has to be between 1 and 100"),
-                            _TR("Length of promo code has to between 1 and 10"),
-                            _TR("Channel code cannot be empty"),
-                            _TR(""),                         # no validation
-                            _TR("The number of free days has to be between 1 and 100"),
-                            _TR("Market code cannot be empty"),
-                            _TR("Reservation source code cannot be empty"),
-                            _TR("Reservation medium code cannot be empty"),
-                            _TR("Percentage value ({Percentage}) has to be between 1 and 100 and start date (" 
-                                + _DATE_FORMAT('From') + ") has to lie before the End date (" 
-                                + _DATE_FORMAT('To') + ")") ]
 
 
 """
@@ -236,13 +129,35 @@ class ActTypes(_CodeFragTypes):
 
 # raw rules data == extended list of _Rule objects
 class _Rules(list):
-    def __init__(self, codedRules = None, *args, **kwargs):
+    def __init__(self, luaScriptCode = None, *args, **kwargs):
         super(_Rules, self).__init__(*args, **kwargs)
-        if codedRules:
-            for codedRule in codedRules.split(_LINESEP):
-                self.append(_Rule(codedRule))
-    def codeRules(self):
-        return _LINESEP.join([r.codeRule() for r in self])
+        if luaScriptCode:
+            # skip first two/three lines: function calcPrice()//day_price = ... (if exists)
+            # .. (v1.6 skips only 2 lines because doesn't have the code line: day_price = sn_standardamount)
+            # .. and skip/remove empty lines and last three lines: end//return.../end
+            luaCodeLines = []
+            for luaCodeLine in luaScriptCode.split(_LINESEP):
+                if len(luaCodeLines) == 0:
+                    if not luaCodeLine.startswith(_INDENT + _COND_IF_BEG):
+                        continue
+                    luaCodeLines.append(_INDENT + _COND_ELSE + luaCodeLine[len(_INDENT):])
+                elif luaCodeLine.startswith(_INDENT + 'end') or luaCodeLine.startswith(_INDENT + 'return ('):
+                    break               # reached the end of the LUA elseif statement
+                elif luaCodeLine:       # skip empty code line
+                    luaCodeLines.append(luaCodeLine)
+            luaRulesCode = _LINESEP.join(luaCodeLines).split(_INDENT + _COND_ELSE + _COND_IF_BEG)[1:]   # first item is empty
+            for luaRuleCode in luaRulesCode:  
+                self.append(_Rule(luaRuleCode))
+
+    def luaCodeGen(self):
+        elseifs = [ r.luaCodeGen() for r in self ]
+        return _LINESEP \
+            + 'function calcPrice()' + _LINESEP \
+            + _INDENT + 'day_price = sn_standardamount' + _LINESEP \
+            + _INDENT + _LINESEP.join(elseifs)[len(_INDENT) + len(_COND_ELSE):] + _LINESEP \
+            + _INDENT + ('end' if len(elseifs) else '') + _LINESEP \
+            + _INDENT + 'return ( day_price )' + _LINESEP \
+            + 'end' + _LINESEP
 
     def validate(self):
         ret = ''
@@ -256,51 +171,81 @@ class _Rules(list):
         except Exception as e:
             ret = _TR("_Rules validation system error: {0}").format(e)
         return ret
-    def luaCode(self):
-        elseifs = [ r.luaCode() for r in self if r.enabled ]
-        return _LINESEP \
-            + 'function calcPrice()' + _LINESEP \
-            + _INDENT + 'day_price = sn_standardamount' + _LINESEP \
-            + _INDENT + _LINESEP.join(elseifs)[len(_INDENT) + len(_COND_ELSE):] + _LINESEP \
-            + _INDENT + ('end' if len(elseifs) else '') + _LINESEP \
-            + _INDENT + 'return ( day_price )' + _LINESEP \
-            + 'end' + _LINESEP
 
 
+# helper method for to parse lua code and recognize conditions/actions of actual and previous versions
+def luaCodeParse(luaCode, typeClass):
+    res = None
+    for nI in range(len(typeClass._types._luaTemplates)):
+        templates = typeClass._types._luaTemplSupportedVersionss[nI]
+        templates.insert(0, typeClass._types._luaTemplates[nI])
+        for formatStr in templates:
+            try:
+                res = parse(formatStr, luaCode)
+            except:
+                res = None
+            if res:
+                break
+        if res:
+            break
+    if res:
+        res = dict(params = res.named, typeI = nI)
+    return res
+    
+    
 class _Rule(object):
-    def __init__(self, codedRule = None):
-        if codedRule:
-            parts = codedRule.split(_COLSEP)
-            self.enabled = parts[0][0] == '+'
-            self.name = parts[0][1:]
-            self.conditions = [Condition(cc) for cc in parts[1].split(_VALSEP)]
-            self.actions = [Action(ca) for ca in parts[2].split(_VALSEP)]
+    def __init__(self, luaRuleCode = None):
+        # set default values for new rule
+        self.enabled = True
+        self.name = _TR("(new rule)")
+        self.conditions = []
+        self.actions = []
+        if luaRuleCode:         # rule definition passed as lua script code
+            # format: condition[<_LINESEP>action0[<_LINESEP>action1...]]
+            parts = luaRuleCode.split(_LINESEP)     # parts[0]==enable-flag/conditions/ruleName
+            condPosBeg = 0
+            condPosEnd = parts[0].find(_COMM_BEG)
+            if condPosEnd == -1:                    # exception for old format from previous version (< 3.1)
+                self.enabled = True                 # old format integrates only the enabled rules in lua code
+                self.name = _TR('(imported rule)')  # .. also the rule name is only stored in the pickled header
+                condPosBeg += 4 if parts[0].startswith('true') else 0
+            else:
+                self.enabled = parts[0].startswith('true')
+                self.name = parts[0][condPosEnd + len(_COMM_BEG):-len(_COMM_END)]
+                condPosBeg += (4 if self.enabled else 5) + len(_OP_AND)
+            condPosEnd = parts[0].find(_COND_IF_END)
+            
+            # because each condition can contain also _OP_AND operators we have to determine the end of each condition here
+            combinedExpr = ''
+            for expr in parts[0][condPosBeg:condPosEnd].strip().split(_OP_AND):
+                combinedExpr += _OP_AND + expr
+                res = luaCodeParse(combinedExpr[len(_OP_AND):], Condition)
+                if res:
+                    self.conditions.append(Condition(combinedExpr[len(_OP_AND):]))
+                    combinedExpr = ''
+            if combinedExpr:      # left overs because of import/parse error
+                self.name = combinedExpr + _TR(' (condition import/parse error)')
+
+            # parts[1:]==actions        
+            if len(parts) > 1:
+                self.actions = [Action(ca.strip()) for ca in parts[1:] if ca.strip()]
+
+    def luaCodeGen(self):
+        # check for empty/TRUE condition
+        conditions = filter(lambda c: c.typeI >= 0, self.conditions)
+        if len(conditions):
+            condCode = _OP_AND.join([ c.luaCodeGen() for c in conditions ]) 
         else:
-            self.enabled = True
-            self.name = _TR("(new rule)")
-            self.conditions = []
-            self.actions = []
-    def codeRule(self):
-        # self.name is QString not str
-        return ('+' if self.enabled else '-') + str(self.name) \
-               + _COLSEP + _VALSEP.join([c.codeCodeFrag() for c in self.conditions]) \
-               + _COLSEP + _VALSEP.join([a.codeCodeFrag() for a in self.actions])
+            condCode = 'true'
+        return _INDENT + _COND_ELSE + _COND_IF_BEG + ('true' if self.enabled else 'false') + _OP_AND + condCode + _COND_IF_END + ' ' + _COMM_BEG + str(self.name) + _COMM_END + _LINESEP \
+            + _LINESEP.join([ _INDENT + _INDENT + a.luaCodeGen() for a in self.actions 
+                              if a.typeI >= 0 ]) + _LINESEP
 
 
     def validate(self):
         return "".join([ c.validate() for c in self.conditions ]
                        + [ a.validate() for a in self.actions ]) \
             if self.enabled else ""     # don't validate disabled rule
-    def luaCode(self):
-        # check for empty/TRUE condition
-        conditions = filter(lambda c: c.typeI >= 0, self.conditions)
-        if len(conditions):
-            condCode = _OP_AND.join([ c.luaCode() for c in conditions ]) 
-        else:
-            condCode = 'true'
-        return _INDENT + _COND_ELSE + 'if (' + condCode + ') then' + _LINESEP \
-            + _LINESEP.join([ _INDENT + _INDENT + a.luaCode() for a in self.actions 
-                              if a.typeI >= 0 ]) + _LINESEP
 
 
 
@@ -319,19 +264,16 @@ class _CodeFragment(object):
     params = {}
     _name = ''
     _types = None
-    def __init__(self, codedCodeFrag = None):
+    def __init__(self, luaCodeFrag = None):
         self.params = dict()     # or {} - needed for to create individual dict for each instance
-        if codedCodeFrag:
-            parts = codedCodeFrag.split(_TYPEPARSEP)
-            self.typeI = int(parts[0])
-            #parts = parts[1].split(_PARAMSEP)
-            #for keyval in parts:
-            #    key, val = keyval.split('=')
-            #    self.params[key] = eval(val)
-            self.params = eval(parts[1])
-    def codeCodeFrag(self):
-        #return str(self.typeI) + _TYPEPARSEP  + _PARAMSEP.join([key + "=" + (str(val) if type(val) is int or type(val) is float else '"' + val + '"') for key, val in self.params.iteritems()])
-        return str(self.typeI) + _TYPEPARSEP  + str(self.params)
+        if luaCodeFrag:
+            res = luaCodeParse(luaCodeFrag, self)
+            if res:
+                self.typeI = res['typeI']
+                self.params = res['params']
+
+    def luaCodeGen(self):
+        return self._types._luaTemplates[self.typeI].format(**self.params) if self.typeI >= 0 else ''
 
     def setTypeIndex(self, typeI, types):
         if self._types._isExclusives[typeI]:     # prevent duplicate exclusive condition/action type
@@ -372,8 +314,6 @@ class _CodeFragment(object):
                 ret = _TR("<p>{0} <b>{1}</b> format error: {2}!")\
                         .format(self._name, self.caption(), e)
         return ret
-    def luaCode(self):
-        return self._types._luaTemplates[self.typeI].format(**self.params) if self.typeI >= 0 else ''
 
 
 class Condition(_CodeFragment):
@@ -506,7 +446,7 @@ class RulesModel(QAbstractTableModel):
     def setSourceRowForNextAdd(self, sourceRowForNextAdd):
         self._sourceRowForNextAdd = sourceRowForNextAdd
     def saveScript(self):
-        _saveScript(self._scriptFileName, self._rules.codeRules(), self._rules.luaCode())
+        _saveScript(self._scriptFileName, self._rules.luaCodeGen())
         
     
     
@@ -639,7 +579,7 @@ def _loadScript(fnam):
         if hdr == _HEADER_PREFIX:
             pos = rest.find(_HEADER_SUFFIX)
             if pos >= 0:
-                ret = rest[:pos]
+                ret = rest[pos + len(_HEADER_SUFFIX):]
             else:
                 _ERROR(_TR("Header suffix not found in lua script {0}.").format(fnam))
         else:
@@ -649,11 +589,10 @@ def _loadScript(fnam):
     fileObj.close()
     return ret
 
-def _saveScript(fnam, codedRules, luaCode):
+def _saveScript(fnam, luaCode):
     fileObj = open(fnam, 'wb')
     try:
         fileObj.write(_HEADER_PREFIX)
-        fileObj.write(codedRules)
         fileObj.write(_HEADER_SUFFIX)
         fileObj.write(luaCode)
     except Exception as e:
@@ -664,8 +603,8 @@ def _saveScript(fnam, codedRules, luaCode):
 def _loadCodeFragTypes(config, codeFragTypeClass):
     codeFragCount = config.getint('main', 'Num' + codeFragTypeClass._name + 's')
     if codeFragCount:                     # Conditions/Actions are specified within config - load/overwrite within class/type (either Condition or Action)
-        # overwrite configurable class attributes (_luaTemplates, _validationTemplates, _typeCaptions, _isExclusives, _params, _paramTemplates, _validationCaptions)
-        for attr in [a for a in codeFragTypeClass.__dict__ if not a.startswith('__') and not a.startswith('_name')]:
+        # overwrite configurable class attributes (_luaTemplates, _validationTemplates, _typeCaptions, _isExclusives, _params, _paramTemplates, _validationCaptions, _luaTemplSupportedVersionss)
+        for attr in [a for a in dir(codeFragTypeClass) if not a.startswith('__') and not a.startswith('_name')]:
             attrVals = []
             for nI in range(codeFragCount):
                 attrVals.append(eval(config.get(codeFragTypeClass._name + str(nI), attr[1:-1])))
